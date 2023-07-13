@@ -1,4 +1,5 @@
 sa-private-key.json
+sa-private-key.base64
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
