@@ -13,6 +13,7 @@ jobs:
           command: |
             whereis pip
             echo 'export PATH=~$PATH:~/.local/bin:/home/circleci/.pyenv/shims/:$(pwd)/bin' >> $BASH_ENV && source $BASH_ENV
+            echo $PATH
             pip install --user -r requirements.txt
       - run:
           name: Run Tests
