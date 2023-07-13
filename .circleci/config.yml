@@ -11,9 +11,7 @@ jobs:
       - run:
           name: Install Python Dependencies
           command: |
-            whereis pip
             echo 'export PATH=~/.local/bin:~/.pyenv/shims:$PATH' >> $BASH_ENV && source $BASH_ENV
-            echo $PATH
             pyenv exec pip install --user -r requirements.txt
       - run:
           name: Run Tests
@@ -42,7 +40,6 @@ jobs:
           google-project-id: GOOGLE_PROJECT_ID
           google-compute-zone: GOOGLE_COMPUTE_ZONE
       - gcp-gcr/push-image:
-          digest-path: /tmp/digest.txt
           google-project-id: GOOGLE_PROJECT_ID
           registry-url: "us.gcr.io"
           image: $IMAGE_NAME
