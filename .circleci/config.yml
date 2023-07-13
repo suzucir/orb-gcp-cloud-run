@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  gcp-gcr: circleci/gcp-gcr@0.6.1
+  gcp-gcr: circleci/gcp-gcr@0.15.1
   cloudrun: circleci/gcp-cloud-run@1.0.2
 jobs:
   build_test:
@@ -12,7 +12,7 @@ jobs:
           name: Install Python Dependencies
           command: |
             whereis pip
-            echo 'export PATH=~$PATH:~/.local/bin:/home/circleci/.pyenv/shims/:$(pwd)/bin' >> $BASH_ENV && source $BASH_ENV
+            echo 'export PATH=~$PATH:~/.local/bin:/home/circleci/.pyenv/shims:$(pwd)/bin' >> $BASH_ENV && source $BASH_ENV
             echo $PATH
             pip install --user -r requirements.txt
       - run:
@@ -29,7 +29,7 @@ jobs:
       - run:
           name: Build app binary and Docker image
           command: |
-            echo 'export PATH=~$PATH:~/.local/bin:/home/circleci/.pyenv/shims/:$(pwd)/bin' >> $BASH_ENV
+            echo 'export PATH=~$PATH:~/.local/bin:/home/circleci/.pyenv/shims:$(pwd)/bin' >> $BASH_ENV
             echo ${GOOGLE_CLOUD_KEY} | base64 --decode --ignore-garbage > $HOME/gcloud-service-key.json
             echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
             echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
