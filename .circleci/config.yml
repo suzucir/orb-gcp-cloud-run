@@ -42,6 +42,7 @@ jobs:
           google-project-id: GOOGLE_PROJECT_ID
           google-compute-zone: GOOGLE_COMPUTE_ZONE
       - gcp-gcr/push-image:
+          digest-path: /tmp/digest.txt
           google-project-id: GOOGLE_PROJECT_ID
           registry-url: "us.gcr.io"
           image: $IMAGE_NAME
