@@ -14,7 +14,7 @@ jobs:
             whereis pip
             echo 'export PATH=~$PATH:~/.local/bin:~/.pyenv/shims:$(pwd)/bin' >> $BASH_ENV && source $BASH_ENV
             echo $PATH
-            pip install --user -r requirements.txt
+            pyenv exec pip install --user -r requirements.txt
       - run:
           name: Run Tests
           command: |
