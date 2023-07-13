@@ -12,7 +12,7 @@ jobs:
           name: Install Python Dependencies
           command: |
             whereis pip
-            echo 'export PATH=~/.local/bin:~/.pyenv/shims:$(pwd)/bin:$PATH' >> $BASH_ENV && source $BASH_ENV
+            echo 'export PATH=~/.local/bin:~/.pyenv/shims:$PATH' >> $BASH_ENV && source $BASH_ENV
             echo $PATH
             pyenv exec pip install --user -r requirements.txt
       - run:
@@ -29,7 +29,7 @@ jobs:
       - run:
           name: Build app binary and Docker image
           command: |
-            echo 'export PATH=~/.local/bin:~/.pyenv/shims:$(pwd)/bin:$PATH' >> $BASH_ENV
+            echo 'export PATH=~/.local/bin:~/.pyenv/shims:$PATH' >> $BASH_ENV
             echo ${GCP_PROJECT_KEY} | base64 --decode --ignore-garbage > $HOME/gcloud-service-key.json
             echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
             echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
