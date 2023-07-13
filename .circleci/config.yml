@@ -5,7 +5,7 @@ orbs:
 jobs:
   build_test:
     docker:
-      - image: circleci/python:3.7.4
+      - image: cimg/python:3.10
     steps:
       - checkout
       - run:
@@ -19,7 +19,7 @@ jobs:
             pytest
   build_push_image_cloud_run_mangaged:
     docker:
-      - image: circleci/python:3.7.4
+      - image: cimg/python:3.10
     steps:
       - checkout
       - setup_remote_docker:
