@@ -32,9 +32,14 @@ jobs:
           echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
           echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
           echo 'export IMAGE_NAME=$CIRCLE_PROJECT_REPONAME' >> $BASH_ENV && source $BASH_ENV
+          cp $BASH_ENV /tmp/bash_env.txt
+          echo $IMAGE_NAME >> /tmp/bash_env.txt
           pip install --user -r requirements.txt
           pyinstaller -F hello_world.py
           docker build -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME:$TAG .
+    - store_artifacts:
+          path: /tmp/bash_env.txt
+          destination: bash_env.txt
     - run:
         command: |
           #!/usr/bin/env sh
