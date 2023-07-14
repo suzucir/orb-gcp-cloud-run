@@ -235,7 +235,24 @@ jobs:
           ORB_VAL_REGISTRY_URL: gcr.io
         name: gcloud auth configure-docker
     - run:
-        command: "#!/bin/bash \n\nIFS=\",\" read -ra DOCKER_TAGS <<< \"$ORB_EVAL_TAG\"\nPROJECT_ID=\"${!ORB_ENV_PROJECT_ID}\"\necho $PROJECT_ID\n\nfor tag_to_eval in \"${DOCKER_TAGS[@]}\"; do\n    TAG=$(eval echo \"$tag_to_eval\")\n    docker push \"$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$TAG\"\n    echo \"docker push done!!"\ndone\n\nif [ -n \"$ORB_VAL_DIGEST_PATH\" ]; then\n    mkdir -p \"$(dirname \"$ORB_VAL_DIGEST_PATH\")\"\n    SAMPLE_FIRST=$(eval echo \"${DOCKER_TAGS[0]}\")\n    echo \"\before docker image inspect"\n    echo \"$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$SAMPLE_FIRST\"\n    docker image inspect --format=\"{{index .RepoDigests 0}}\" \"$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$SAMPLE_FIRST\" > \"$ORB_VAL_DIGEST_PATH\"\nfi\n"
+        command: |
+                IFS="," read -ra DOCKER_TAGS <<< "$ORB_EVAL_TAG"
+                PROJECT_ID="${!ORB_ENV_PROJECT_ID}"
+                echo $PROJECT_ID
+                
+                for tag_to_eval in "${DOCKER_TAGS[@]}"; do
+                    TAG=$(eval echo "$tag_to_eval")
+                    docker push "$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$TAG"
+                    echo "docker push done!!"
+                done
+                
+                if [ -n "$ORB_VAL_DIGEST_PATH" ]; then
+                    mkdir -p "$(dirname "$ORB_VAL_DIGEST_PATH")"
+                    AMPLE_FIRST=$(eval echo "${DOCKER_TAGS[0]}")
+                    echo "\before docker image inspect"
+                    echo "$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$SAMPLE_FIRST"
+                    docker image inspect --format="{{index .RepoDigests 0}}" "$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$SAMPLE_FIRST" > "$ORB_VAL_DIGEST_PATH"
+                fi
         environment:
           ORB_ENV_PROJECT_ID: GOOGLE_PROJECT_ID
           ORB_EVAL_TAG: latest
