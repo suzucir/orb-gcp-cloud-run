@@ -1,58 +1,316 @@
-version: 2.1
-orbs:
-  gcp-gcr: circleci/gcp-gcr@0.15.1
-  cloudrun: circleci/gcp-cloud-run@1.0.2
+# Orb 'circleci/gcp-gcr@0.15.1' resolved to 'circleci/gcp-gcr@0.15.1'
+# Orb 'circleci/gcp-cloud-run@1.0.2' resolved to 'circleci/gcp-cloud-run@1.0.2'
+# WARNING: Command 'deploy' in orbs.cloudrun.commands.deploy may override built-in CircleCI command 'deploy'
+version: 2
 jobs:
   build_test:
     docker:
-      - image: cimg/python:3.10
+    - image: cimg/python:3.10
     steps:
-      - checkout
-      - run:
-          name: Install Python Dependencies
-          command: |
-            echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV && source $BASH_ENV
-            pyenv exec pip install --user -r requirements.txt
-      - run:
-          name: Run Tests
-          command: |
-            pytest
+    - checkout
+    - run:
+        name: Install Python Dependencies
+        command: |
+          echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV && source $BASH_ENV
+          pyenv exec pip install --user -r requirements.txt
+    - run:
+        name: Run Tests
+        command: |
+          pytest
   build_push_image_cloud_run_mangaged:
     docker:
-      - image: cimg/python:3.10
+    - image: cimg/python:3.10
     steps:
-      - checkout
-      - setup_remote_docker:
-          docker_layer_caching: false
-      - run:
-          name: Build app binary and Docker image
-          command: |
-            echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV
-            echo ${GCP_PROJECT_KEY} | base64 --decode --ignore-garbage > $HOME/gcloud-service-key.json
-            echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
-            echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
-            echo 'export IMAGE_NAME=$CIRCLE_PROJECT_REPONAME' >> $BASH_ENV && source $BASH_ENV
-            pip install --user -r requirements.txt
-            pyinstaller -F hello_world.py
-            docker build -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME:$TAG .
-      - gcp-gcr/gcr-auth:
-          gcloud-service-key: GOOGLE_CLOUD_KEYS
-          google-project-id: GOOGLE_PROJECT_ID
-          google-compute-zone: GOOGLE_COMPUTE_ZONE
-      - gcp-gcr/push-image:
-          google-project-id: GOOGLE_PROJECT_ID
-          registry-url: "us.gcr.io"
-          image: $IMAGE_NAME
-      - cloudrun/deploy:
-          platform: "managed"
-          image: "us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME"
-          service-name: "orb-gcp-cloud-run"
-          region: $GOOGLE_COMPUTE_ZONE
-          unauthenticated: true
+    - checkout
+    - setup_remote_docker:
+        docker_layer_caching: false
+    - run:
+        name: Build app binary and Docker image
+        command: |
+          echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV
+          echo ${GCP_PROJECT_KEY} | base64 --decode --ignore-garbage > $HOME/gcloud-service-key.json
+          echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
+          echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
+          echo 'export IMAGE_NAME=$CIRCLE_PROJECT_REPONAME' >> $BASH_ENV && source $BASH_ENV
+          pip install --user -r requirements.txt
+          pyinstaller -F hello_world.py
+          docker build -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME:$TAG .
+    - run:
+        command: |
+          #!/usr/bin/env sh
+          # shellcheck disable=SC3043 # while "local" isn't POSIX, it's supported in many shells. See: https://www.shellcheck.net/wiki/SC3043
+
+          fetch_latest_version() {
+            local release_notes
+            local release_notes_exit_code
+
+            release_notes="$(curl --location --silent --fail --retry 3 https://cloud.google.com/sdk/docs/release-notes)"
+            release_notes_exit_code="$?"
+
+            [ "$release_notes_exit_code" -gt 0 ] && { printf '%s\n' "Failed to get release notes"; return "$release_notes_exit_code"; }
+
+            local releases
+            releases="$(printf '%s\n' "$release_notes" | grep -E '<h2 id=".*" data-text=".*">[0-9]+.[0-9]+.[0-9]+.*</h2>' | sed 's/<h2.*>\([0-9]*.[0-9]*.[0-9]*\).*<\/h2>/\1/')"
+
+            local latest_version
+            latest_version="$(printf '%s\n' "$releases" | head -n 1)"
+
+            [ -z "$latest_version" ] && { printf '%s\n' "Couldn't find out what is the latest version available."; return 1; }
+            version="$latest_version"
+          }
+
+          # $1: version
+          install() {
+            local arg_version="$1"
+            [ -z "$arg_version" ] && { printf '%s\n' "No version provided."; return 1; }
+
+            local install_dir
+            install_dir="$(mktemp -d)"
+
+            # after version 370, gcloud is called "cli" rather than "sdk"
+            major_version="$(echo "$1" | awk -F. '{print $1}')"
+            if [ "$major_version" -gt 370 ]; then url_path_fixture="cli"
+            else url_path_fixture="sdk"; fi
+
+            curl --location --silent --fail --retry 3 --output "$install_dir/google-cloud-sdk.tar.gz" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-$url_path_fixture-$arg_version-linux-x86_64.tar.gz"
+            tar -xzf "$install_dir/google-cloud-sdk.tar.gz" -C "$install_dir"
+            printf '%s\n' ". $install_dir/google-cloud-sdk/path.bash.inc" >> "$BASH_ENV"
+
+            # If the envinronment is Alpine, remind the user to source $BASH_ENV in every step.
+            if [ -f /etc/os-release ] && grep -q "Alpine" "/etc/os-release"; then
+              printf '%s\n' "Alpine detected. Please make sure to source \$BASH_ENV in every step."
+              printf '%s\n' "Otherwise gcloud won't be available."
+              printf '%s\n' "You can do this by adding the following line in the beginning of your command:"
+              printf '%s\n' "\". \$BASH_ENV\""
+
+              # Alpine also needs a workaround since Google's "path.bash.inc" doesn't work.
+              printf '%s\n' "export PATH=$install_dir/google-cloud-sdk/bin:$PATH" >> "$BASH_ENV"
+            fi
+
+            # shellcheck disable=SC1090
+            . "$BASH_ENV"
+            if ! command -v gcloud > /dev/null 2>&1; then return 1; fi
+            printf '%s\n' "Google Cloud SDK version: $(gcloud --version)"
+          }
+
+          uninstall() {
+            if ! command -v sudo > /dev/null 2>&1; then
+              printf '%s\n' "sudo is required to uninstall the Google Cloud SDK."
+              printf '%s\n' "Please install it and try again."
+              return 1
+            fi
+
+            # Set sudo to work whether logged in as root user or non-root user.
+            if [ "$(id -u)" -eq 0 ]; then sudo=""; else sudo="sudo"; fi
+
+            local installation_directory
+            installation_directory="$(gcloud info --format='value(installation.sdk_root)')"
+
+            local config_directory
+            config_directory="$(gcloud info --format='value(config.paths.global_config_dir)')"
+
+            # shellcheck disable=SC2086 # $sudo is not a variable, it's a command.
+            $sudo rm -rf "$installation_directory" || return 1
+
+            # shellcheck disable=SC2086 # $sudo is not a variable, it's a command.
+            $sudo rm -rf "$config_directory" || return 1
+          }
+
+          # Check if curl is installed
+          if ! command -v curl > /dev/null 2>&1; then
+            printf '%s\n' "curl is required to install the Google Cloud SDK."
+            printf '%s\n' "Please install it and try again."
+            exit 1
+          fi
+
+          # Figure out what is latest version available if "latest" is passed as an argument.
+          version="$ORB_VAL_VERSION"
+          [ "$version" = "latest" ] && fetch_latest_version
+
+          if command -v gcloud > /dev/null 2>&1; then
+            installed_version="$(gcloud version | head -n 1 | sed 's/Google Cloud SDK \([0-9]*.[0-9]*.[0-9]*\)/\1/')"
+
+            if [ "$installed_version" != "$version" ]; then
+              printf '%s\n' "The version installed ($installed_version) differs from the version requested ($version)."
+              printf '%s\n' "Uninstalling v${installed_version}..."
+              if ! uninstall; then printf '%s\n' "Failed to uninstall the current version."; exit 1; fi
+
+              printf '%s\n' "Installing v${version}..."
+              if ! install "$version"; then printf '%s\n' "Failed to install the requested version."; exit 1; fi
+            else
+              printf '%s\n' "The version installed ($installed_version) matches the version requested ($version)."
+              printf '%s\n' "Skipping installation."
+            fi
+          else
+            printf '%s\n' "Google Cloud SDK is not installed. Installing it."
+            if ! install "$version"; then printf '%s\n' "Failed to install the requested version."; exit 1; fi
+          fi
+
+          # Install user provided gcloud components
+          if [ -n "$ORB_VAL_COMPONENTS" ]; then
+            set -f
+            for component in $ORB_VAL_COMPONENTS; do
+                set -- "$@" "$component"
+            done
+            set +f
+
+            gcloud components install "$@"
+          fi
+        environment:
+          ORB_VAL_COMPONENTS: ''
+          ORB_VAL_VERSION: latest
+        name: Install latest gcloud CLI version, if not available
+    - run:
+        command: |
+          #!/usr/bin/env bash
+
+          # Expand parameters
+          readonly service_key=${!ORB_ENV_SERVICE_KEY}
+          readonly project_id=${!ORB_ENV_PROJECT_ID}
+          readonly compute_zone=${!ORB_ENV_COMPUTE_ZONE}
+          readonly compute_region=${!ORB_ENV_COMPUTE_REGION}
+
+          # Eval parameters
+          cred_file_path=$(eval "echo $ORB_EVAL_CRED_FILE")
+
+          # Store service account
+          printf '%s\n' "$service_key" > "$HOME"/gcloud-service-key.json
+
+          # Initialize gcloud CLI
+          gcloud --quiet config set core/disable_usage_reporting true
+          gcloud --quiet config set component_manager/disable_update_check true
+
+          # Use oidc
+          if [ "$ORB_VAL_USE_OIDC" = 1 ]; then
+            echo "Authorizing using OIDC token"
+
+            if [ -z "$CIRCLE_OIDC_TOKEN" ]; then
+              echo "Ensure this job has a context to populate OIDC token"
+              echo "See more: https://circleci.com/docs/openid-connect-tokens/#openid-connect-id-token-availability"
+              exit 1
+            fi
+
+            echo "$CIRCLE_OIDC_TOKEN" > "$HOME/oidc_token"
+            # Store OIDC token in temp file
+            gcloud iam workload-identity-pools create-cred-config \
+                "projects/${!ORB_ENV_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${!ORB_ENV_POOL_ID}/providers/${!ORB_ENV_POOL_PROVIDER_ID}" \
+                --service-account="${!ORB_ENV_SERVICE_EMAIL}" \
+                --credential-source-type="text" \
+                --credential-source-file="$HOME/oidc_token" \
+                --output-file="$cred_file_path"
+
+            # Configure gcloud to leverage the generated credential configuration
+            gcloud auth login --brief --cred-file "$cred_file_path"
+            # Configure ADC
+            echo "export GOOGLE_APPLICATION_CREDENTIALS='$cred_file_path'" | tee -a "$BASH_ENV"
+          else
+            gcloud auth activate-service-account --key-file="$HOME"/gcloud-service-key.json
+          fi
+
+          gcloud --quiet config set project "$project_id"
+
+          if [[ -n "$compute_zone" ]]; then
+            gcloud --quiet config set compute/zone "$compute_zone"
+          fi
+
+          if [[ -n "$compute_region" ]]; then
+            gcloud --quiet config set compute/region "$compute_region"
+          fi
+        environment:
+          ORB_ENV_COMPUTE_REGION: GOOGLE_COMPUTE_REGION
+          ORB_ENV_COMPUTE_ZONE: GOOGLE_COMPUTE_ZONE
+          ORB_ENV_POOL_ID: OIDC_WIP_ID
+          ORB_ENV_POOL_PROVIDER_ID: OIDC_WIP_PROVIDER_ID
+          ORB_ENV_PROJECT_ID: GOOGLE_PROJECT_ID
+          ORB_ENV_PROJECT_NUMBER: GOOGLE_PROJECT_NUMBER
+          ORB_ENV_SERVICE_EMAIL: OIDC_SERVICE_ACCOUNT_EMAIL
+          ORB_ENV_SERVICE_KEY: GOOGLE_CLOUD_KEYS
+          ORB_EVAL_CRED_FILE: ~/gcp_cred_config.json
+          ORB_VAL_USE_OIDC: false
+        name: Initialize gcloud CLI to connect to Google Cloud
+    - run:
+        command: "#!/bin/bash \n\n# Set sudo to work whether logged in as root user or non-root user\nif [[ $EUID == 0 ]]; then export SUDO=\"\"; else export SUDO=\"sudo\"; fi\n\n# configure Docker to use gcloud as a credential helper\nmkdir -p \"$HOME/.docker\"\n\nif [[ \"$ORB_VAL_REGISTRY_URL\" == *\"docker.pkg.dev\" ]]; then\n    gcloud auth configure-docker --quiet --project \"${!ORB_ENV_PROJECT_ID}\" \"$ORB_VAL_REGISTRY_URL\"\nelse\n    gcloud auth configure-docker --quiet --project \"${!ORB_ENV_PROJECT_ID}\"\nfi\n\n# if applicable, provide user access to the docker config file\nif [[ -d \"$HOME/.docker\" ]]; then\n    $SUDO chown \"$USER:$USER\" \"$HOME/.docker\" -R\nfi\nif [[ -d \"$HOME/.config\" ]]; then\n    $SUDO chown \"$USER:$USER\" \"$HOME/.config\" -R\nfi\n"
+        environment:
+          ORB_ENV_PROJECT_ID: GOOGLE_PROJECT_ID
+          ORB_VAL_REGISTRY_URL: gcr.io
+        name: gcloud auth configure-docker
+    - run:
+        command: "#!/bin/bash \n\nIFS=\",\" read -ra DOCKER_TAGS <<< \"$ORB_EVAL_TAG\"\nPROJECT_ID=\"${!ORB_ENV_PROJECT_ID}\"\n\nfor tag_to_eval in \"${DOCKER_TAGS[@]}\"; do\n    TAG=$(eval echo \"$tag_to_eval\")\n    docker push \"$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$TAG\"\ndone\n\nif [ -n \"$ORB_VAL_DIGEST_PATH\" ]; then\n    mkdir -p \"$(dirname \"$ORB_VAL_DIGEST_PATH\")\"\n    SAMPLE_FIRST=$(eval echo \"${DOCKER_TAGS[0]}\")\n    docker image inspect --format=\"{{index .RepoDigests 0}}\" \"$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$SAMPLE_FIRST\" > \"$ORB_VAL_DIGEST_PATH\"\nfi\n"
+        environment:
+          ORB_ENV_PROJECT_ID: GOOGLE_PROJECT_ID
+          ORB_EVAL_TAG: latest
+          ORB_VAL_DIGEST_PATH: ''
+          ORB_VAL_IMAGE: $IMAGE_NAME
+          ORB_VAL_REGISTRY_URL: us.gcr.io
+        name: Push image to GCR
+    - run:
+        command: |
+          PLATFORM=managed
+          case $PLATFORM in
+            managed)
+              echo 'Platform: Managed'
+              # Check for required parameters
+              GCP_REGION=$GOOGLE_COMPUTE_ZONE
+              GCP_SERVICE_NAME=orb-gcp-cloud-run
+              if [ -z $GCP_REGION ]; then
+                echo 'The region parameter is required for the "managed" platform.'
+                exit 1
+              fi
+              if [ -z $GCP_SERVICE_NAME ]; then
+                echo 'The service-name parameter is required for the "managed" platform.'
+                exit 1
+              fi
+              # End of parameter check
+              # Deployment command
+              gcloud beta run deploy orb-gcp-cloud-run \
+              --image us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME \
+              --region $GOOGLE_COMPUTE_ZONE \
+              --allow-unauthenticated \
+               \
+              --platform managed
+              echo
+              echo "Service deployed"
+              echo
+              GET_GCP_DEPLOY_ENDPOINT=$(gcloud beta run services describe orb-gcp-cloud-run --platform managed --region $GOOGLE_COMPUTE_ZONE --format="value(status.address.url)")
+              echo "export GCP_DEPLOY_ENDPOINT=$GET_GCP_DEPLOY_ENDPOINT" >> $BASH_ENV
+              source $BASH_ENV
+              echo $GCP_DEPLOY_ENDPOINT
+              ;;
+            gke)
+              echo 'Platform: GKE'
+              # Check for required parameters
+              GCP_CLUSTER=
+              GCP_CLUSTER_LOCATION=
+              if [ -z $GCP_CLUSTER ]; then
+                echo 'The cluster parameter is required for the "gke" platform.'
+                exit 1
+              fi
+              if [ -z $GCP_CLUSTER_LOCATION ]; then
+                echo 'The cluster-location parameter is required for the "gke" platform.'
+                exit 1
+              fi
+              # End of parameter check
+              # Deployment command
+              echo "Ensure all required APIs are enabled"
+              echo
+              gcloud services enable container.googleapis.com containerregistry.googleapis.com cloudbuild.googleapis.com
+              echo
+              gcloud beta run deploy orb-gcp-cloud-run\
+              --cluster  \
+              --cluster-location  \
+              --image us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME \
+              --platform gke
+              echo
+              echo "Service deployed"
+              echo
+              ;;
+          esac
+        name: Cloud Run deploy
 workflows:
   build_test_deploy:
     jobs:
-      - build_test
-      - build_push_image_cloud_run_mangaged:
-          requires:
-            - build_test
+    - build_test
+    - build_push_image_cloud_run_mangaged:
+        requires:
+        - build_test
+  version: 2
