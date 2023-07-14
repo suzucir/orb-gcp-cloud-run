@@ -61,7 +61,7 @@ jobs:
       - run:
           name: Verify that gcloud is authenticated
           environment:
-            GCP_SERVICE_ACCOUNT_EMAIL: CIRCLECI@circleci-oidc-test.iam.gserviceaccount.com
+            GCP_SERVICE_ACCOUNT_EMAIL: dummy-385@circleci-oidc-test.iam.gserviceaccount.com
           command: gcloud iam service-accounts get-iam-policy "${GCP_SERVICE_ACCOUNT_EMAIL}"
 
 workflows:
