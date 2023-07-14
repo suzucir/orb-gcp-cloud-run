@@ -248,7 +248,7 @@ jobs:
                 for tag_to_eval in "${DOCKER_TAGS[@]}"; do
                     TAG=$(eval echo "$tag_to_eval")
                     echo $ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$TAG > /tmp/tag.txt
-                    echo $ORB_VAL_REGISTRY_URL/$PROJECT_ID/$(eval echo "$ORB_VAL_IMAGE"):$TAG >> /tmp/tag.txt
+                    echo $IMAGE_NAME >> /tmp/tag.txt
                     cat /tmp/tag.txt
                     echo "before docker push!"                    
                     docker push "$ORB_VAL_REGISTRY_URL/$PROJECT_ID/$ORB_VAL_IMAGE:$TAG"
