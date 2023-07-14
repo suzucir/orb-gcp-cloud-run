@@ -1,64 +1,73 @@
 version: 2.1
+
 orbs:
-  gcp-gcr: circleci/gcp-gcr@0.15.1
-  cloudrun: circleci/gcp-cloud-run@1.0.2
+  gcp-cli: circleci/gcp-cli@2.4.1
+
+commands:
+  gcp-oidc-generate-cred-config-file:
+    description: "Authenticate with GCP using a CircleCI OIDC token."
+    parameters:
+      project_id:
+        type: env_var_name
+        default: GCP_PROJECT_ID
+      workload_identity_pool_id:
+        type: env_var_name
+        default: GCP_WIP_ID
+      workload_identity_pool_provider_id:
+        type: env_var_name
+        default: GCP_WIP_PROVIDER_ID
+      service_account_email:
+        type: env_var_name
+        default: GCP_SERVICE_ACCOUNT_EMAIL
+      gcp_cred_config_file_path:
+        type: string
+        default: /home/circleci/gcp_cred_config.json
+      oidc_token_file_path:
+        type: string
+        default: /home/circleci/oidc_token.json
+    steps:
+      - run:
+          command: |
+            # Store OIDC token in temp file
+            echo $CIRCLE_OIDC_TOKEN > << parameters.oidc_token_file_path >>
+            # Create a credential configuration for the generated OIDC ID Token
+            gcloud iam workload-identity-pools create-cred-config \
+                "projects/${<< parameters.project_id >>}/locations/global/workloadIdentityPools/${<< parameters.workload_identity_pool_id >>}/providers/${<< parameters.workload_identity_pool_provider_id >>}"\
+                --output-file="<< parameters.gcp_cred_config_file_path >>" \
+                --service-account="${<< parameters.service_account_email >>}" \
+                --credential-source-file=<< parameters.oidc_token_file_path >>
+
+  gcp-oidc-authenticate:
+    description: "Authenticate with GCP using a GCP credentials file."
+    parameters:
+      gcp_cred_config_file_path:
+        type: string
+        default: /home/circleci/gcp_cred_config.json
+    steps:
+      - run:
+          command: |
+            # Configure gcloud to leverage the generated credential configuration
+            gcloud auth login --brief --cred-file "<< parameters.gcp_cred_config_file_path >>"
+            # Configure ADC
+            echo "export GOOGLE_APPLICATION_CREDENTIALS='<< parameters.gcp_cred_config_file_path >>'" | tee -a "$BASH_ENV"
+
 jobs:
-  build_test:
-    docker:
-      - image: cimg/python:3.10
+  gcp-oidc-defaults:
+    executor: gcp-cli/default
     steps:
-      - checkout
+      - gcp-cli/install
+      - gcp-oidc-generate-cred-config-file
+      - gcp-oidc-authenticate
       - run:
-          name: Install Python Dependencies
-          command: |
-            echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV && source $BASH_ENV
-            pyenv exec pip install --user -r requirements.txt
-      - run:
-          name: Run Tests
-          command: |
-            pytest
-  build_push_image_cloud_run_mangaged:
-    docker:
-      - image: cimg/python:3.10
-    steps:
-      - checkout
-      - setup_remote_docker:
-          docker_layer_caching: false
-      - run:
-          name: Build app binary and Docker image
-          command: |
-            echo 'export PATH="$(pwd)"/.local/bin:"$(pwd)"/.pyenv/shims:$PATH' >> $BASH_ENV
-            echo ${GCP_PROJECT_KEY} | base64 --decode --ignore-garbage > $HOME/gcloud-service-key.json
-            echo 'export GOOGLE_CLOUD_KEYS=$(cat $HOME/gcloud-service-key.json)' >> $BASH_ENV
-            echo 'export TAG=${CIRCLE_SHA1}' >> $BASH_ENV
-            echo 'export IMAGE_NAME=${CIRCLE_PROJECT_REPONAME}' >> $BASH_ENV
-            source $BASH_ENV
-            cp $BASH_ENV /tmp/bash_env.txt
-            pip install --user -r requirements.txt
-            pyinstaller -F hello_world.py
-            docker build -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME -t us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME:$TAG .
-      - run:
-          name: Output image name
-          command: |
-            echo $IMAGE_NAME >> /tmp/bash_env.txt
-      - store_artifacts:
-          path: /tmp/bash_env.txt
-          destination: bash_env.txt
-      - gcp-gcr/gcr-auth:
-          gcloud-service-key: GOOGLE_CLOUD_KEYS
-          google-project-id: GOOGLE_PROJECT_ID
-          google-compute-zone: GOOGLE_COMPUTE_ZONE
-      - gcp-gcr/push-image:
-          google-project-id: GOOGLE_PROJECT_ID
-          registry-url: "us.gcr.io"
-          image: orb-gcp-cloud-run
-      - cloudrun/deploy:
-          platform: "managed"
-          image: "us.gcr.io/$GOOGLE_PROJECT_ID/$IMAGE_NAME"
-          service-name: "orb-gcp-cloud-run"
-          region: $GOOGLE_COMPUTE_ZONE
-          unauthenticated: true
+          name: Verify that gcloud is authenticated
+          environment:
+            GCP_SERVICE_ACCOUNT_EMAIL: GCP_SERVICE_ACCOUNT_EMAIL
+          command: gcloud iam service-accounts get-iam-policy "${GCP_SERVICE_ACCOUNT_EMAIL}"
+
 workflows:
-  build_test_deploy:
+  main:
     jobs:
-      - build_push_image_cloud_run_mangaged
+      - gcp-oidc-defaults:
+          name: Generate Creds File and Authenticate
+          context:
+          - gcp-oidc-dev
