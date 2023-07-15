@@ -53,7 +53,8 @@ commands:
 
 jobs:
   gcp-oidc-defaults:
-    executor: cimg/gcp:2023.07
+    docker:
+      - image: cimg/gcp:2023.07
     steps:
       - gcp-cli/install
       - gcp-oidc-generate-cred-config-file
