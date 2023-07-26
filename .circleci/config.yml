@@ -337,3 +337,4 @@ workflows:
     jobs:
     - build_push_image_cloud_run_mangaged:
   version: 2
+  
